@@ -20,10 +20,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           labels=""
+
+          if echo "$PR_HEAD_REF" | grep -qE '^automation/release-generated-v'; then
+            labels="$labels chore"
+            labels="$labels skip-changelog"
+          fi
+
           if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*Bug fix'; then labels="$labels bug"; fi
           if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*New feature / skill'; then labels="$labels feature"; fi
           if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*Breaking change'; then labels="$labels breaking"; fi
