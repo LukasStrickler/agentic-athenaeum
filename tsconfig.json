@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@agentic-athenaeum/contracts": ["packages/contracts/src"],
+      "@agentic-athenaeum/contracts/*": ["packages/contracts/src/*"],
+      "@agentic-athenaeum/queries": ["packages/queries/src"],
+      "@agentic-athenaeum/queries/*": ["packages/queries/src/*"]
+    }
+  },
+  "include": ["dev/**/*.ts", "packages/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+}

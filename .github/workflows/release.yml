@@ -1,0 +1,392 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "prepare opens/updates release PR, publish creates tag+GitHub Release"
+        required: true
+        type: choice
+        options:
+          - prepare
+          - publish
+        default: prepare
+      version:
+        description: "Version to release (SemVer: 1.0.0, 0.2.0-beta.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark GitHub Release as pre-release (publish mode only)"
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: "Validate only, do not open PR or publish release"
+        required: false
+        type: boolean
+        default: false
+      allow_clobber:
+        description: "Allow publish rerun to reuse existing tag/release assets with --clobber (publish mode only)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Release Request
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      tag: ${{ steps.semver.outputs.tag }}
+      previous_tag: ${{ steps.previous.outputs.tag }}
+      tag_exists: ${{ steps.tag_state.outputs.tag_exists }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || github.token }}
+
+      - name: Ensure running on main
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "::error::Release workflow must be run from main branch"
+            exit 1
+          fi
+
+      - name: Validate version format
+        id: semver
+        run: |
+          VERSION="${{ inputs.version }}"
+          SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+          if ! [[ "$VERSION" =~ $SEMVER_RE ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            echo "Use SemVer format: 1.0.0, 0.2.0-beta.1, 1.0.0-rc.1"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag state
+        id: tag_state
+        run: |
+          TAG="v${{ inputs.version }}"
+
+          TAG_EXISTS="false"
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG"; then
+            TAG_EXISTS="true"
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_EXISTS="true"
+          fi
+
+          echo "tag_exists=$TAG_EXISTS" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.mode }}" = "prepare" ] && [ "$TAG_EXISTS" = "true" ]; then
+            echo "::error::Tag $TAG already exists. Choose a new version for prepare mode."
+            exit 1
+          fi
+
+          if [ "${{ inputs.mode }}" = "publish" ] && [ "$TAG_EXISTS" = "true" ]; then
+            if [ "${{ inputs.allow_clobber }}" = "true" ]; then
+              echo "Tag $TAG already exists. Clobber mode enabled: publish will reuse the tag and may overwrite release assets."
+            else
+              echo "::error::Tag $TAG already exists and allow_clobber=false."
+              echo "Choose a new version for publish, or rerun with -f allow_clobber=true to intentionally reuse tag/release assets."
+              exit 1
+            fi
+          fi
+
+      - name: Get previous tag
+        id: previous
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          PREV_TAG="${{ steps.previous.outputs.tag }}"
+          [ -z "$PREV_TAG" ] && PREV_TAG="none"
+          echo "## Release Request" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Mode | ${{ inputs.mode }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | ${{ inputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | v${{ inputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Pre-release | ${{ inputs.prerelease }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry run | ${{ inputs.dry_run }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Allow clobber | ${{ inputs.allow_clobber }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag exists | ${{ steps.tag_state.outputs.tag_exists }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Previous | $PREV_TAG |" >> "$GITHUB_STEP_SUMMARY"
+
+  prepare-release-pr:
+    name: Prepare Release PR
+    needs: validate
+    if: ${{ inputs.mode == 'prepare' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Create GitHub App token (optional)
+        id: app-token
+        if: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || github.token }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify source and generated runtime
+        run: pnpm run verify
+
+      - name: Check generated skills diff
+        id: diff
+        run: |
+          if git diff --quiet -- skills; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update release-generated PR
+        id: cpr
+        if: ${{ inputs.dry_run == false && steps.diff.outputs.changed == 'true' }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || github.token }}
+          branch: "automation/release-generated-v${{ inputs.version }}"
+          delete-branch: false
+          title: "chore(release): generate skills for v${{ inputs.version }}"
+          commit-message: "chore(release): generate skills for v${{ inputs.version }}"
+          body: |
+            This PR is auto-generated by release workflow mode=prepare.
+
+            - Source of truth: `dev/`
+            - Generated runtime output: `skills/`
+            - Target release: `v${{ inputs.version }}`
+
+            After merge, run release workflow with mode=publish for the same version.
+          add-paths: |
+            skills/**
+
+      - name: Prepare summary
+        env:
+          HAS_APP_TOKEN: ${{ steps.app-token.outputs.token != '' }}
+          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CHANGED: ${{ steps.diff.outputs.changed }}
+          PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
+          PR_URL: ${{ steps.cpr.outputs.pull-request-url }}
+        run: |
+          echo "## Prepare Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DRY_RUN" = "true" ]; then
+            if [ "$CHANGED" = "true" ]; then
+              echo "Dry run: generated skills changes detected. PR creation skipped." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Dry run: no generated skills changes detected." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          if [ "$CHANGED" != "true" ]; then
+            echo "No generated skills changes were detected. Nothing to open." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Opened/updated PR #$PR_NUMBER:" >> "$GITHUB_STEP_SUMMARY"
+            echo "$PR_URL" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$HAS_APP_TOKEN" = "true" ]; then
+              echo "Auth mode: GitHub App token" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$HAS_RELEASE_TOKEN" = "true" ]; then
+              echo "Auth mode: RELEASE_BOT_TOKEN" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Auth mode: github.token" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "No PR URL returned by create-pull-request. Check workflow logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  publish-release:
+    name: Publish Release
+    needs: validate
+    if: ${{ inputs.mode == 'publish' && inputs.dry_run == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub App token (optional)
+        id: app-token
+        if: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || github.token }}
+
+      - name: Ensure publish run is on latest origin/main
+        run: |
+          git fetch --no-tags origin main
+          HEAD_SHA=$(git rev-parse HEAD)
+          MAIN_SHA=$(git rev-parse origin/main)
+          if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
+            echo "::error::Checked-out HEAD is stale versus origin/main."
+            echo "HEAD: $HEAD_SHA"
+            echo "origin/main: $MAIN_SHA"
+            echo "Rerun publish from latest main to avoid releasing stale artifacts."
+            exit 1
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify project
+        run: pnpm run verify
+
+      - name: Ensure skills/ is release-ready on main
+        run: |
+          pnpm run build:skills
+          if ! git diff --quiet -- skills; then
+            echo "::error::skills/ is not synced with dev/ on main."
+            echo "Run release.yml with mode=prepare, merge generated PR, then rerun mode=publish."
+            git --no-pager diff -- skills
+            exit 1
+          fi
+
+      - name: Prepare release bundle directories
+        run: node scripts/prepare-release-bundles.mjs
+
+      - name: Create JavaScript release archive
+        working-directory: dist/release-assets/js
+        run: zip -r "../../agentic-athenaeum-v${{ inputs.version }}-skills-js.zip" skills
+
+      - name: Create TypeScript release archive
+        working-directory: dist/release-assets/ts
+        run: zip -r "../../agentic-athenaeum-v${{ inputs.version }}-skills-ts.zip" skills
+
+      - name: Generate release checksums
+        working-directory: dist
+        run: |
+          sha256sum "agentic-athenaeum-v${{ inputs.version }}-skills-js.zip" \
+            "agentic-athenaeum-v${{ inputs.version }}-skills-ts.zip" \
+            > "agentic-athenaeum-v${{ inputs.version }}-checksums.txt"
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        if: ${{ needs.validate.outputs.tag_exists != 'true' }}
+        run: |
+          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || github.token }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          NOTES_START=""
+          if [ -n "${{ needs.validate.outputs.previous_tag }}" ]; then
+            NOTES_START="--notes-start-tag ${{ needs.validate.outputs.previous_tag }}"
+          fi
+
+          if gh release view "v${{ inputs.version }}" >/dev/null 2>&1; then
+            if [ "${{ inputs.allow_clobber }}" = "true" ]; then
+              gh release upload "v${{ inputs.version }}" \
+                "dist/agentic-athenaeum-v${{ inputs.version }}-skills-js.zip#Compiled JavaScript skills (SKILL.md + .js actions)" \
+                "dist/agentic-athenaeum-v${{ inputs.version }}-skills-ts.zip#Raw TypeScript skills (SKILL.md + .ts actions)" \
+                "dist/agentic-athenaeum-v${{ inputs.version }}-checksums.txt#SHA256 checksums for release assets" \
+                --clobber
+            else
+              echo "::error::Release v${{ inputs.version }} already exists and allow_clobber=false."
+              echo "Rerun with -f allow_clobber=true to intentionally overwrite release assets, or publish a new version."
+              exit 1
+            fi
+          else
+            gh release create "v${{ inputs.version }}" \
+              --title "v${{ inputs.version }}" \
+              --generate-notes \
+              $NOTES_START \
+              $PRERELEASE_FLAG \
+              "dist/agentic-athenaeum-v${{ inputs.version }}-skills-js.zip#Compiled JavaScript skills (SKILL.md + .js actions)" \
+              "dist/agentic-athenaeum-v${{ inputs.version }}-skills-ts.zip#Raw TypeScript skills (SKILL.md + .ts actions)" \
+              "dist/agentic-athenaeum-v${{ inputs.version }}-checksums.txt#SHA256 checksums for release assets"
+          fi
+
+      - name: Publish summary
+        run: |
+          echo "## Release Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: v${{ inputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ needs.validate.outputs.tag_exists }}" = "true" ] && [ "${{ inputs.allow_clobber }}" = "true" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "WARNING: Clobber mode in effect (allow_clobber=true): tag already existed, publish reused existing tag, and release assets may be overwritten via --clobber." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  dry-run-summary:
+    name: Dry Run Summary
+    needs: validate
+    if: ${{ inputs.dry_run == true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Print dry-run next steps
+        run: |
+          echo "## Dry Run Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Validation passed. No PR was opened and no release was published." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run actual command:" >> "$GITHUB_STEP_SUMMARY"
+          echo "gh workflow run release.yml -f mode=${{ inputs.mode }} -f version=${{ inputs.version }}" >> "$GITHUB_STEP_SUMMARY"

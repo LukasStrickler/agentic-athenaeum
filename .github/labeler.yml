@@ -1,0 +1,25 @@
+# Labeler configuration
+# Docs: https://github.com/actions/labeler
+
+skill:
+  - changed-files:
+      - any-glob-to-any-file: "dev/**/*"
+      - any-glob-to-any-file: "skills/**/*"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: "docs/**/*"
+      - any-glob-to-any-file: "README.md"
+      - any-glob-to-any-file: "CONTRIBUTING.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**/*"
+
+infrastructure:
+  - changed-files:
+      - any-glob-to-any-file: "scripts/**/*"
+      - any-glob-to-any-file: "packages/**/*"
+      - any-glob-to-any-file: "package.json"
+      - any-glob-to-any-file: "pnpm-lock.yaml"
+      - any-glob-to-any-file: "tsconfig.json"
