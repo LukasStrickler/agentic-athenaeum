@@ -78,6 +78,7 @@ jobs:
               .filter(Boolean);
             const trustedActors = new Set([
               "github-actions[bot]",
+              "app/agentic-athenaeum-release-bot",
               ...configuredTrustedActors,
             ]);
             const trustedActor =
