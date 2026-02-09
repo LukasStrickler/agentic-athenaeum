@@ -186,6 +186,8 @@ jobs:
         id: cpr
         if: ${{ inputs.dry_run == false && steps.diff.outputs.changed == 'true' }}
         uses: peter-evans/create-pull-request@v7
+        env:
+          ALLOW_SKILLS_COMMIT: "1"
         with:
           token: ${{ steps.app-token.outputs.token != '' && steps.app-token.outputs.token || secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || github.token }}
           branch: "automation/release-generated-v${{ inputs.version }}"
