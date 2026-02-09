@@ -4,6 +4,8 @@ Brief description of changes.
 
 ## Type of Change
 
+_Note: Checking these boxes will automatically apply matching labels to your PR._
+
 - [ ] Bug fix
 - [ ] New feature / skill
 - [ ] Breaking change

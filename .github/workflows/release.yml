@@ -138,14 +138,19 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      HAS_APP_CREDENTIALS: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Create GitHub App token (optional)
         id: app-token
-        if: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
+        if: ${{ env.HAS_APP_CREDENTIALS == 'true' }}
         uses: actions/create-github-app-token@v1
+        env:
+          RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+          RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
         with:
-          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          app-id: ${{ env.RELEASE_BOT_APP_ID }}
+          private-key: ${{ env.RELEASE_BOT_APP_PRIVATE_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -244,14 +249,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      HAS_APP_CREDENTIALS: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Create GitHub App token (optional)
         id: app-token
-        if: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
+        if: ${{ env.HAS_APP_CREDENTIALS == 'true' }}
         uses: actions/create-github-app-token@v1
+        env:
+          RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+          RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
         with:
-          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          app-id: ${{ env.RELEASE_BOT_APP_ID }}
+          private-key: ${{ env.RELEASE_BOT_APP_PRIVATE_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
