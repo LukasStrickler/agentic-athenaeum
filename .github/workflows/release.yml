@@ -199,11 +199,18 @@ jobs:
             skills/**
 
       - name: Prepare summary
+        env:
+          HAS_APP_TOKEN: ${{ steps.app-token.outputs.token != '' }}
+          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CHANGED: ${{ steps.diff.outputs.changed }}
+          PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
+          PR_URL: ${{ steps.cpr.outputs.pull-request-url }}
         run: |
           echo "## Prepare Result" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            if [ "${{ steps.diff.outputs.changed }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
+            if [ "$CHANGED" = "true" ]; then
               echo "Dry run: generated skills changes detected. PR creation skipped." >> "$GITHUB_STEP_SUMMARY"
             else
               echo "Dry run: no generated skills changes detected." >> "$GITHUB_STEP_SUMMARY"
@@ -211,17 +218,17 @@ jobs:
             exit 0
           fi
 
-          if [ "${{ steps.diff.outputs.changed }}" != "true" ]; then
+          if [ "$CHANGED" != "true" ]; then
             echo "No generated skills changes were detected. Nothing to open." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          if [ -n "${{ steps.cpr.outputs.pull-request-number }}" ]; then
-            echo "Opened/updated PR #${{ steps.cpr.outputs.pull-request-number }}:" >> "$GITHUB_STEP_SUMMARY"
-            echo "${{ steps.cpr.outputs.pull-request-url }}" >> "$GITHUB_STEP_SUMMARY"
-            if [ -n "${{ steps.app-token.outputs.token }}" ]; then
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Opened/updated PR #$PR_NUMBER:" >> "$GITHUB_STEP_SUMMARY"
+            echo "$PR_URL" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$HAS_APP_TOKEN" = "true" ]; then
               echo "Auth mode: GitHub App token" >> "$GITHUB_STEP_SUMMARY"
-            elif [ -n "${{ secrets.RELEASE_BOT_TOKEN }}" ]; then
+            elif [ "$HAS_RELEASE_TOKEN" = "true" ]; then
               echo "Auth mode: RELEASE_BOT_TOKEN" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "Auth mode: github.token" >> "$GITHUB_STEP_SUMMARY"
