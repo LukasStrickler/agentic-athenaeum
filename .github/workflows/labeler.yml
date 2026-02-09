@@ -2,7 +2,7 @@ name: Labeler
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -15,3 +15,22 @@ jobs:
       - uses: actions/labeler@v5
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-label from PR body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          labels=""
+          if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*Bug fix'; then labels="$labels bug"; fi
+          if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*New feature / skill'; then labels="$labels feature"; fi
+          if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*Breaking change'; then labels="$labels breaking"; fi
+          if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*Documentation'; then labels="$labels docs"; fi
+          if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*Refactoring'; then labels="$labels maintenance"; fi
+          if echo "$PR_BODY" | grep -qiE '^\s*-\s*\[[xX]\]\s*CI/CD'; then labels="$labels ci"; fi
+
+          for label in $labels; do
+            echo "Adding label: $label"
+            gh pr edit "$PR_NUMBER" --add-label "$label" || echo "Failed to add label $label (it might not exist), skipping."
+          done
