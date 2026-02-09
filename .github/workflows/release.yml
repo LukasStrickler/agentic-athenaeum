@@ -176,10 +176,10 @@ jobs:
       - name: Check generated skills diff
         id: diff
         run: |
-          if git diff --quiet -- skills; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
+          if [ -n "$(git status --porcelain -- skills)" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create or update release-generated PR
