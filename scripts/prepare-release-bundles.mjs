@@ -7,8 +7,15 @@ const bundleRoot = path.resolve("dist", "release-assets");
 const jsBundleRoot = path.join(bundleRoot, "js", "skills");
 const tsBundleRoot = path.join(bundleRoot, "ts", "skills");
 
-const isForbiddenArtifact = (name) => {
+const isForbiddenArtifact = (name, allowSkillMd = false) => {
   const lowerName = name.toLowerCase();
+
+  const isSkillMd = lowerName === "skill.md";
+  const isSkillsMd = lowerName === "skills.md";
+
+  if (isSkillMd && allowSkillMd) {
+    return false;
+  }
 
   return (
     lowerName === ".env" ||
@@ -17,8 +24,8 @@ const isForbiddenArtifact = (name) => {
     lowerName.endsWith(".key") ||
     lowerName.endsWith(".sqlite") ||
     lowerName.endsWith(".log") ||
-    lowerName === "skill.md" ||
-    lowerName === "skills.md"
+    isSkillMd ||
+    isSkillsMd
   );
 };
 
@@ -83,7 +90,7 @@ const assertNoForbiddenArtifactsInTree = async (rootPath, currentPath = rootPath
 
     if (!entry.isFile()) continue;
 
-    if (isForbiddenArtifact(entry.name)) {
+    if (isForbiddenArtifact(entry.name, rootPath === generatedRoot)) {
       throw new Error(`Forbidden artifact found: ${path.relative(rootPath, entryPath)}`);
     }
   }
