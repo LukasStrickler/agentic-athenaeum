@@ -15,6 +15,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const devRoot = path.join(repoRoot, "dev");
 
 const VALID_LEVELS = new Set(["unit", "integration", "e2e"]);
+const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 function listSkillsWithTests() {
   if (!existsSync(devRoot) || !statSync(devRoot).isDirectory()) {
@@ -89,7 +90,7 @@ function main() {
 
   const needsBuild = !level || level === "integration" || level === "e2e";
   if (needsBuild) {
-    const buildResult = spawnSync("pnpm", ["run", "build:skills"], {
+    const buildResult = spawnSync(pnpmCmd, ["run", "build:skills"], {
       cwd: repoRoot,
       stdio: "inherit",
       shell: false,
@@ -107,7 +108,7 @@ function main() {
   }
   vitestArgs.push(...extraArgs);
 
-  const result = spawnSync("pnpm", ["exec", "vitest", ...vitestArgs], {
+  const result = spawnSync(pnpmCmd, ["exec", "vitest", ...vitestArgs], {
     cwd: repoRoot,
     stdio: "inherit",
     shell: false,
