@@ -1,0 +1,16 @@
+# Default owner for everything
+* @LukasStrickler
+
+# Source skills (editable); skills/ is generated, updated only via release PRs
+/dev/ @LukasStrickler
+/skills/ @LukasStrickler
+
+# CI/CD and release
+/.github/ @LukasStrickler
+
+# Build and shared packages
+/scripts/ @LukasStrickler
+/packages/ @LukasStrickler
+
+# Documentation and ADRs
+/docs/ @LukasStrickler

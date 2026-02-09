@@ -1,0 +1,55 @@
+{
+  "name": "agentic-athenaeum",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Educational agent skills with TS authoring and Node JS distribution.",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "build:skills": "node scripts/build-skills.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:md": "markdownlint .",
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run lint:md && pnpm run format:check && pnpm run test",
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "hooks:guard": "node scripts/guard-skills-paths.mjs",
+    "prepare": "pnpm run hooks:install",
+    "test": "pnpm run build:skills && vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "pnpm run build:skills && vitest run --project integration",
+    "test:e2e": "pnpm run build:skills && vitest run --project e2e",
+    "test:skill": "node scripts/run-skill-tests.mjs",
+    "test:watch": "pnpm run build:skills && vitest",
+    "test:ci": "pnpm run test",
+    "test:coverage": "pnpm run build:skills && vitest run --coverage",
+    "test:verbose": "pnpm run build:skills && vitest run --reporter=verbose"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "@types/node": "^24.3.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^10.0.1",
+    "globals": "^15.14.0",
+    "markdownlint-cli": "^0.38.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.15.0",
+    "vite-tsconfig-paths": "^5.1.2",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@agentic-athenaeum/contracts": "workspace:*",
+    "@agentic-athenaeum/queries": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

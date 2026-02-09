@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+
+# Local env (secrets); see docs/environment-variables.md
+.env
+.env.local
+.env.*.local
+
+.ada/
+.sisyphus/

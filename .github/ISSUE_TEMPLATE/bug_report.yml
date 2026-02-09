@@ -1,0 +1,78 @@
+name: Bug Report
+description: Report a bug in a skill or repository
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Clear description of the bug
+      placeholder: What happened? What did you expect?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: skill
+    attributes:
+      label: Affected Skill
+      description: Which skill has the bug?
+      options:
+        - placeholder
+        - "(general repository issue)"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Agent Platform
+      description: Which agent are you using?
+      options:
+        - OpenCode
+        - Claude Code
+        - Cursor
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the bug
+      placeholder: |
+        1. 
+        2. 
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / Recordings (optional)
+      description: Attach zero or more images or videos by dragging files into this field.
+      placeholder: Paste or drag-and-drop any number of screenshots, GIFs, or recordings here.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version, shell
+      placeholder: |
+        OS: Ubuntu 22.04
+        Node: v24.0.0
+        Shell: bash
+    validations:
+      required: false

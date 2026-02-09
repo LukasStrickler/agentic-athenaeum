@@ -1,0 +1,4 @@
+node_modules/
+dist/
+skills/
+pnpm-lock.yaml
