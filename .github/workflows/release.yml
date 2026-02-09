@@ -139,16 +139,18 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
-      RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+      HAS_APP_CREDENTIALS: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Create GitHub App token (optional)
         id: app-token
-        if: ${{ env.RELEASE_BOT_APP_ID != '' && env.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
+        if: ${{ env.HAS_APP_CREDENTIALS == 'true' }}
         uses: actions/create-github-app-token@v1
+        env:
+          RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+          RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
         with:
-          app-id: ${{ env.RELEASE_BOT_APP_ID }}
-          private-key: ${{ env.RELEASE_BOT_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -248,16 +250,18 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
-      RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+      HAS_APP_CREDENTIALS: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Create GitHub App token (optional)
         id: app-token
-        if: ${{ env.RELEASE_BOT_APP_ID != '' && env.RELEASE_BOT_APP_PRIVATE_KEY != '' }}
+        if: ${{ env.HAS_APP_CREDENTIALS == 'true' }}
         uses: actions/create-github-app-token@v1
+        env:
+          RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+          RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
         with:
-          app-id: ${{ env.RELEASE_BOT_APP_ID }}
-          private-key: ${{ env.RELEASE_BOT_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
