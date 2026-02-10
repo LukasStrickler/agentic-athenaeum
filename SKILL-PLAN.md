@@ -35,7 +35,218 @@ This means every skill follows a **three-beat rhythm**:
 
 ---
 
-## 2. Pipeline Overview
+## 2. Subagent Architecture: How the Agent Parallelizes Work
+
+The THINK step above hides enormous complexity. When `pdf-dissect` extracts 40
+images and 12 sections from a textbook, the agent doesn't process them one by
+one — it **fans out** to parallel subagents, each handling one unit of work.
+
+This section defines how skills instruct agents to do this, regardless of which
+agent harness is running.
+
+### The Subagent Landscape (2026)
+
+Modern AI coding agents all converge on the same primitive: **spawn an isolated
+sub-task with its own context window, optionally in the background.**
+
+| Agent Harness | Spawn Primitive | Parallel? | Context Isolation? |
+|--------------|----------------|-----------|-------------------|
+| **Claude Code** | `Task({ prompt, subagent_type, run_in_background })` | Yes — multiple `Task` calls with `run_in_background: true` | Yes — subagent gets only what's in `prompt`, not parent history |
+| **OpenCode** | `task({ prompt, subagent_type, category, load_skills, run_in_background })` | Yes — same pattern, returns `task_id` for later collection | Yes — subagent is stateless unless given `session_id` |
+| **Cursor** | Background agents (via agent rules / custom instructions) | Limited — primarily sequential with some tool-level parallelism | Partial — shares project context |
+| **Generic LLM** | Sequential processing (no native subagents) | No — but can process items in batches via prompt | N/A — single context window |
+
+**The critical insight:** Our skills must be **harness-agnostic**. A skill can't
+call `task()` directly — that's an OpenCode-specific API. Instead, skills
+describe their parallelizable work in `SKILL.md` and `references/`, and the
+agent harness translates that into whatever primitives it supports.
+
+### How Skills Instruct Subagent Usage
+
+Skills communicate subagent patterns through three mechanisms:
+
+```
+SKILL.md                    →  "What" (actions, workflow overview)
+references/WORKFLOW.md      →  "How" (step-by-step orchestration guide)
+references/<step>.md        →  "Per-step" (exact prompt + expected I/O for each subagent unit)
+```
+
+#### The `references/WORKFLOW.md` Pattern
+
+Every skill that benefits from parallelization includes a `references/WORKFLOW.md`
+that describes the orchestration in **harness-neutral language**:
+
+```markdown
+# pdf-dissect Workflow
+
+## Step 1: Extract (script)
+Run `scripts/extract.js --input <pdf-path> --output <work-dir>`.
+This produces: structure.json, raw/ocr-text.txt, assets/*.png, images.json.
+
+## Step 2: Clean sections (PARALLELIZABLE — fan out)
+For each section in structure.json:
+  - Send the section's raw text + title + page range to a subagent
+  - Include the prompt from references/section-cleanup.md
+  - Collect the cleaned Markdown from each subagent
+
+⚡ CONCURRENCY: Each section is independent. Process all in parallel.
+📦 CONTEXT PER UNIT: ~2000 tokens (section text + metadata)
+📤 OUTPUT PER UNIT: Cleaned Markdown string
+
+## Step 3: Classify images (PARALLELIZABLE — fan out)
+For each unique image in images.json (skip duplicates):
+  - Send the image + surrounding text context to a subagent
+  - Include the prompt from references/image-classification.md
+  - Collect the classification JSON from each subagent
+
+⚡ CONCURRENCY: Each image is independent. Process all in parallel.
+📦 CONTEXT PER UNIT: Image + ~500 chars surrounding text + document summary
+📤 OUTPUT PER UNIT: JSON { classification, description, relevance, ... }
+
+## Step 4: Assemble (script)
+Run `scripts/assemble.js` with cleaned sections + image classifications.
+This produces the final Content Package.
+```
+
+**Why this works across harnesses:**
+
+| Harness | How it reads this workflow |
+|---------|--------------------------|
+| **Claude Code** | Sees "PARALLELIZABLE — fan out" → spawns N `Task()` calls with `run_in_background: true`, collects results |
+| **OpenCode** | Sees same markers → spawns N `task(run_in_background=true)` calls, uses `background_output()` to collect |
+| **Cursor** | Sees same markers → processes sequentially (no native fan-out), but batches items in single prompts where possible |
+| **Generic LLM** | Sees same markers → processes items one at a time, or batches 3-5 into a single prompt for efficiency |
+
+### Subagent Contract Pattern
+
+Each parallelizable step has a corresponding `references/<step>.md` that defines
+the **exact contract** for a single subagent unit. This is the prompt template
+the agent gives to each spawned subagent.
+
+**Example: `references/section-cleanup.md`**
+
+```markdown
+# Section Cleanup — Subagent Instructions
+
+You are cleaning up one section of raw OCR/extracted text from a PDF.
+
+## Input you will receive
+- **Section title**: The heading for this section
+- **Section level**: Heading depth (1 = H1, 2 = H2, etc.)
+- **Page range**: Which pages this section spans
+- **Raw text**: The extracted text, which may have OCR artifacts
+- **Document title**: For context about the overall document
+
+## Your task
+1. Fix OCR artifacts (broken words, garbled characters, misrecognized symbols)
+2. Restore paragraph structure (the raw text may have lost line breaks)
+3. Format as clean Markdown:
+   - Preserve heading hierarchy (use ## for H2, ### for H3, etc.)
+   - Detect and format lists (bulleted and numbered)
+   - Detect and format tables (use Markdown table syntax)
+   - Wrap mathematical notation in $...$ (inline) or $$...$$ (display)
+   - Preserve emphasis (bold, italic) where detectable from context
+4. Do NOT add content that isn't in the source
+5. Do NOT summarize — preserve all information
+
+## Output format
+Return ONLY the cleaned Markdown text. No wrapper, no commentary.
+```
+
+**Example: `references/image-classification.md`**
+
+```markdown
+# Image Classification — Subagent Instructions
+
+You are classifying one image extracted from a PDF document.
+
+## Input you will receive
+- **Image**: The image file
+- **Surrounding text**: ~500 characters before and after the image's position
+- **Document summary**: Title + table of contents for global context
+
+## Your task
+Analyze the image and return a JSON object:
+
+{
+  "classification": "diagram|chart|photo|text-as-image|formula|decorative",
+  "relevance": "content|noise",
+  "description": "One sentence describing what this image shows",
+  "better_as_text": true/false,
+  "text_replacement": "If better_as_text, the text/table/LaTeX equivalent"
+}
+
+## Classification guide
+- **diagram**: Architecture diagrams, flowcharts, system designs → content
+- **chart**: Graphs, plots, data visualizations → content
+- **photo**: Real-world photographs → content if relevant to topic, noise if decorative
+- **text-as-image**: Screenshots of text, scanned text blocks → content, set better_as_text=true
+- **formula**: Mathematical equations as images → content, set better_as_text=true, provide LaTeX
+- **decorative**: Logos, borders, clip art, separator lines → noise
+
+## Output format
+Return ONLY the JSON object. No wrapper, no commentary.
+```
+
+### Fan-Out Patterns Across Skills
+
+Every skill's parallelizable steps, consolidated:
+
+| Skill | Fan-Out Step | Units | Context per Unit | Output per Unit |
+|-------|-------------|-------|-----------------|----------------|
+| **pdf-dissect** | Section cleanup | N sections (typically 5–20) | ~2000 tokens | Cleaned Markdown |
+| **pdf-dissect** | Image classification | M images (typically 10–50) | Image + ~500 chars + summary | Classification JSON |
+| **media-transcribe** | Chunk transcription | K chunks (typically 5–30) | Audio segment | Transcript + timestamps |
+| **content-explain** | Section explanation | N groups | Full content package per group | Explanation Markdown |
+| **anki-forge** | Fact extraction | N sections of explanation | ~2000 tokens of explanation | List of atomic facts |
+
+### Bounded Concurrency & Error Handling
+
+Skills should document concurrency limits and failure strategies in their
+`WORKFLOW.md` to prevent overwhelming API rate limits:
+
+```markdown
+## Concurrency guidelines
+- MAX_PARALLEL: 8 (recommended for cloud APIs to avoid rate limiting)
+- RETRY_POLICY: Retry failed units once, then mark as "partial" in manifest
+- TIMEOUT: 60 seconds per unit (section cleanup), 120 seconds (image classification)
+- ON_FAILURE: Continue processing remaining units; log failures in manifest.warnings[]
+```
+
+**How different harnesses handle this:**
+
+| Concern | Claude Code | OpenCode | Fallback (sequential) |
+|---------|------------|----------|----------------------|
+| Concurrency limit | Agent batches `Task` calls (e.g., 8 at a time) | Agent batches `task()` calls | N/A — one at a time |
+| Failure isolation | Failed subagent returns error; parent collects | Same — `background_output` returns error | Agent catches error, logs, continues |
+| Result collection | Parent polls or waits for all tasks | `background_output(task_id)` per task | Results available immediately |
+| Context budget | Each subagent gets fresh context window | Same | Shared context window — watch for overflow |
+
+### Skill-to-Skill Delegation
+
+Some skills benefit from invoking OTHER skills. For example, `content-explain`
+may want to invoke the `image-generation` skill for Generative Fill. This is
+NOT a script-to-script call — it's the agent recognizing it needs another tool:
+
+```markdown
+## In content-explain's WORKFLOW.md:
+
+## Step 4: Generative Fill (OPTIONAL)
+If a concept is abstract and lacks a visual in the source material:
+1. Describe the desired diagram in natural language
+2. Use the `image-generation` skill to create it
+3. Save the generated image to the output assets/ directory
+4. Reference it in the explanation with a [Generated] caption
+
+This step requires the `image-generation` skill to be installed.
+```
+
+The agent reads this, recognizes it has the `image-generation` skill loaded,
+and invokes it naturally — no hard-coded coupling between skills.
+
+---
+
+## 3. Pipeline Overview
 
 ```mermaid
 graph TD
@@ -98,7 +309,7 @@ native capability and add fragile coupling.
 
 ---
 
-## 3. Content Package — The Universal Interface
+## 4. Content Package — The Universal Interface
 
 Every ingestion skill outputs a **Content Package**: a flat directory with a
 strict contract. Downstream skills never need to know whether content came from
@@ -201,9 +412,9 @@ processing status, confidence scores, and content-addressable IDs.
 
 ---
 
-## 4. Skill Specifications
+## 5. Skill Specifications
 
-### 4.1 `pdf-dissect` — PDF Extraction & Visual Sieve
+### 5.1 `pdf-dissect` — PDF Extraction & Visual Sieve
 
 > Strip a PDF down to its atoms: structured text, classified images, and a
 > manifest that tells downstream skills exactly what they're working with.
@@ -316,7 +527,7 @@ metadata:
 
 ---
 
-### 4.2 `media-transcribe` — Audio/Video to Structured Text
+### 5.2 `media-transcribe` — Audio/Video to Structured Text
 
 > Extract audio, transcribe it, and produce a content package with structured,
 > topic-segmented text — ready for explanation and flashcard generation.
@@ -405,7 +616,7 @@ metadata:
 
 ---
 
-### 4.3 `content-organize` — Material Grouping & Correlation
+### 5.3 `content-organize` — Material Grouping & Correlation
 
 > Given a collection of content packages, detect which materials belong together
 > (e.g., a lecture's slides + recording + exercises) and order them logically
@@ -501,7 +712,7 @@ metadata:
 
 ---
 
-### 4.4 `content-explain` — Knowledge Architecture & Study Materials
+### 5.4 `content-explain` — Knowledge Architecture & Study Materials
 
 > The intellectual core of the pipeline. Takes grouped content packages and
 > produces structured explanations, prerequisite definitions (Chapter Zero),
@@ -669,7 +880,7 @@ metadata:
 
 ---
 
-### 4.5 `anki-forge` — Flashcard Generation, Smart Redaction & Sync
+### 5.5 `anki-forge` — Flashcard Generation, Smart Redaction & Sync
 
 > Generate high-quality, atomic Anki flashcards from explanations. Supports
 > smart image redaction for visual recall cards. Syncs to Anki via AnkiConnect
@@ -838,7 +1049,7 @@ metadata:
 
 ---
 
-## 5. Shared Packages
+## 6. Shared Packages
 
 ### `@agentic-athenaeum/contracts`
 
@@ -879,7 +1090,7 @@ documents in each skill.
 
 ---
 
-## 6. Dependency Graph & Implementation Order
+## 7. Dependency Graph & Implementation Order
 
 ```mermaid
 graph LR
@@ -938,7 +1149,7 @@ generate explanations before creating cards from them.
 
 ---
 
-## 7. Testing Strategy
+## 8. Testing Strategy
 
 Following the repository's three-tier test structure:
 
@@ -961,7 +1172,7 @@ Following the repository's three-tier test structure:
 
 ---
 
-## 8. `dev/` Directory Layout (All Skills)
+## 9. `dev/` Directory Layout (All Skills)
 
 ```
 dev/
@@ -976,8 +1187,9 @@ dev/
 │   │   └── assemble.e2e.test.ts
 │   ├── references/
 │   │   ├── REFERENCE.md              # Output format specification
-│   │   ├── image-classification.md    # Guide for agent: how to classify images
-│   │   └── section-cleanup.md         # Guide for agent: how to clean OCR text
+│   │   ├── WORKFLOW.md               # Orchestration guide (steps, fan-out markers)
+│   │   ├── image-classification.md    # Subagent contract: how to classify images
+│   │   └── section-cleanup.md         # Subagent contract: how to clean OCR text
 │   └── assets/
 │
 ├── media-transcribe/
@@ -989,7 +1201,8 @@ dev/
 │   ├── __tests__/
 │   ├── references/
 │   │   ├── REFERENCE.md
-│   │   └── transcript-cleanup.md      # Guide for agent
+│   │   ├── WORKFLOW.md               # Orchestration guide
+│   │   └── transcript-cleanup.md      # Subagent contract: how to clean transcripts
 │   └── assets/
 │
 ├── content-organize/
@@ -999,7 +1212,8 @@ dev/
 │   │   └── apply.ts
 │   ├── __tests__/
 │   ├── references/
-│   │   └── REFERENCE.md
+│   │   ├── REFERENCE.md
+│   │   └── WORKFLOW.md               # Orchestration guide
 │   └── assets/
 │
 ├── content-explain/
@@ -1011,9 +1225,10 @@ dev/
 │   ├── __tests__/
 │   ├── references/
 │   │   ├── REFERENCE.md
-│   │   ├── chapter-zero.md            # Guide: prerequisite detection strategy
-│   │   ├── exercise-handling.md        # Guide: solution paths, not raw problems
-│   │   └── explanation-structure.md    # Guide: progressive depth, cross-referencing
+│   │   ├── WORKFLOW.md               # Orchestration guide (incl. Generative Fill delegation)
+│   │   ├── chapter-zero.md            # Subagent contract: prerequisite detection
+│   │   ├── exercise-handling.md        # Subagent contract: solution paths, not raw problems
+│   │   └── explanation-structure.md    # Subagent contract: progressive depth, cross-referencing
 │   └── assets/
 │       ├── template-study-guide.tex
 │       └── template-summary.typ
@@ -1028,8 +1243,10 @@ dev/
 │   ├── __tests__/
 │   ├── references/
 │   │   ├── REFERENCE.md
-│   │   ├── card-quality.md            # Guide: minimum information principle
-│   │   └── two-stage-extraction.md    # Guide: fact extraction → card creation
+│   │   ├── WORKFLOW.md               # Orchestration guide (two-stage + redaction fan-out)
+│   │   ├── card-quality.md            # Subagent contract: minimum information principle
+│   │   ├── fact-extraction.md         # Subagent contract: Stage 1 claim extraction
+│   │   └── card-creation.md           # Subagent contract: Stage 2 atomic card creation
 │   └── assets/
 │
 packages/
@@ -1053,7 +1270,7 @@ packages/
 
 ---
 
-## 9. Future Extensions (Not in Scope Now)
+## 10. Future Extensions (Not in Scope Now)
 
 Ideas to consider after the core five skills are stable:
 
@@ -1069,7 +1286,7 @@ Ideas to consider after the core five skills are stable:
 
 ---
 
-## 10. Open Design Questions
+## 11. Open Design Questions
 
 | # | Question | Options | Current Leaning |
 |---|----------|---------|----------------|
@@ -1084,7 +1301,7 @@ Ideas to consider after the core five skills are stable:
 
 ---
 
-## 11. Glossary
+## 12. Glossary
 
 | Term | Definition |
 |------|-----------|
