@@ -345,7 +345,10 @@ The pipeline accepts 0 to N input files. Supported types: PDF, audio (including 
 | **Markdown**    | `md-ingest`    | One lane: extract → worker → reviewer → gate → ContentPackage (scripts: headings, frontmatter, structure). |
 | **PPTX**        | `pptx-ingest`  | Pre-ingestion: always one PDF; 0 to M extracted media (if any). Orchestrator runs `pdf-ingest` on PDF and `media-ingest` on each extracted media (1 + 0..M lanes). |
 
-For PPTX inputs: run `pptx-ingest` first (scripts: LibreOffice convert to PDF, ZIP extract for `ppt/media/` if present; output is a pre-ingestion manifest). There is always one derived PDF; embedded audio/video may be absent (0 media) or present (M media). Treat the manifest's `pdf_path` as one lane (pdf-ingest) and each `media[].path` as one lane (media-ingest). No change to the ContentPackage contract; each lane produces one ContentPackage as usual.
+For PPTX inputs: run `pptx-ingest` first (scripts: LibreOffice convert to PDF, ZIP extract for `ppt/media/` if present; output is a pre-ingestion manifest).
+There is always one derived PDF; embedded audio/video may be absent (0 media) or present (M media).
+Treat the manifest's `pdf_path` as one lane (pdf-ingest) and each `media[].path` as one lane (media-ingest).
+No change to the ContentPackage contract; each lane produces one ContentPackage as usual.
 
 N input files (after any PPTX expansion) produce N fully independent parallel ingestion pipelines. Each file is self-contained: its own worker, its own reviewer, its own quality gate. No file waits for another. A single file failure does not block the others. When N = 0, Phase 1 completes with zero packages.
 
