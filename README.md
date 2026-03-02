@@ -98,6 +98,7 @@ To work on the repo (edit skills, run tests, open a PR), see **[CONTRIBUTING.md]
 | [docs/environment-variables.md](./docs/environment-variables.md) | Env reference: precedence, global paths, implementation                                          |
 | [docs/bundling.md](./docs/bundling.md)                           | How skill scripts are bundled; `@agentic-athenaeum/contracts` and `@agentic-athenaeum/queries`   |
 | [docs/architecture.md](./docs/architecture.md)                   | System architecture                                                                              |
+| [ROADMAP.md](./ROADMAP.md)                                       | Implementation roadmap (skills, phases, waves, definition of done)                               |
 | [docs/workflow.md](./docs/workflow.md)                           | Development workflow                                                                             |
 | [docs/release-runbook.md](./docs/release-runbook.md)             | Release process and contributor DX (maintainers)                                                 |
 | [AGENTS.md](./AGENTS.md)                                         | Project contract and agent guidance                                                              |
